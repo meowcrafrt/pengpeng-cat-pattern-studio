@@ -396,12 +396,17 @@ svg.onpointermove=e=>{if(mode!=='ruler'||panning)return rulerMove(e)};
 document.querySelectorAll('[data-mode]').forEach(b=>{const choose=b.onclick;b.onclick=()=>{choose();if(mode==='ruler')$('status').textContent='點畫布放置比例尺左上角：固定 5 cm，每小格 1 mm。請預留約 54 × 17 mm 空間。'}});
 function watermarkTextValue(){return $('watermarkText').dataset.applied??'蓬蓬貓手作'}
 function watermarkLevel(){const value=Number($('watermarkOpacity').value);return Number.isFinite(value)&&value>=5?Math.max(5,Math.min(35,value)):18}
-function watermarkSvg(){
+function watermarkSvg(box={x0:0,y0:0,x1:paperW,y1:paperH}){
  if(!$('watermarkEnabled').checked)return '';
  const opacity=watermarkLevel()/100,gray=Math.round(255*(1-opacity)),lineGray=Math.round(255*(1-opacity*.8));
  const characters=[...watermarkTextValue()],lines=[];for(let i=0;i<characters.length;i+=10)lines.push(characters.slice(i,i+10).join(''));
- const label=lines.map((line,i)=>`<text x="40" y="${42+(i-(lines.length-1)/2)*7}" text-anchor="middle" font-family="'Microsoft JhengHei','PingFang TC','Noto Sans TC',sans-serif" font-size="5" font-weight="600" letter-spacing="0.2" fill="rgb(${gray},${gray},${gray})" text-rendering="geometricPrecision">${xmlText(line)}</text>`).join('');
- return `<defs><pattern id="brandWatermark" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M 40 0 L 80 40 L 40 80 L 0 40 Z" fill="none" stroke="rgb(${lineGray},${lineGray},${lineGray})" stroke-width="0.18" stroke-dasharray="1.4 1.2"/>${label}</pattern></defs><rect x="0" y="0" width="${paperW}" height="${paperH}" fill="url(#brandWatermark)" pointer-events="none"/>`;
+ // Draw actual text nodes: SVG paint-server patterns can be rasterized at low resolution when printed.
+ let content='';
+ for(let y=Math.floor(box.y0/80)*80;y<box.y1;y+=80)for(let x=Math.floor(box.x0/80)*80;x<box.x1;x+=80){
+  content+=`<path d="M ${x+40} ${y} l 40 40 l -40 40 l -40 -40 Z" fill="none" stroke="rgb(${lineGray},${lineGray},${lineGray})" stroke-width="0.18" stroke-dasharray="1.4 1.2"/>`;
+  content+=lines.map((line,i)=>`<text x="${x+40}" y="${y+42+(i-(lines.length-1)/2)*7}" text-anchor="middle" font-family="'Microsoft JhengHei','PingFang TC','Noto Sans TC',sans-serif" font-size="5" font-weight="600" letter-spacing="0.2" fill="rgb(${gray},${gray},${gray})">${xmlText(line)}</text>`).join('');
+ }
+ return `<svg x="${box.x0}" y="${box.y0}" width="${box.x1-box.x0}" height="${box.y1-box.y0}" viewBox="${box.x0} ${box.y0} ${box.x1-box.x0} ${box.y1-box.y0}" overflow="hidden" pointer-events="none" aria-label="品牌浮水印">${content}</svg>`;
 }
 function renderWatermark(){$('addWatermark').disabled=$('watermarkEnabled').checked;$('removeWatermark').disabled=!$('watermarkEnabled').checked;$('watermarkLayer').innerHTML=watermarkSvg();$('watermarkValue').textContent=watermarkLevel()+'%'}
 $('watermarkEnabled').onchange=()=>{render();$('status').textContent=$('watermarkEnabled').checked?'已開啟滿版淡字浮水印，位於版型底層。':'已關閉浮水印。'};$('watermarkOpacity').oninput=()=>render();
@@ -937,10 +942,10 @@ function tilePrintPlan(box,size,landscape,overlap){
 function tilePrintDocument(plan){
  const {w,h,margin,header,cw,ch,sx,sy,cols,rows,overlap,box}=plan;
  const content=printPathsSvg()+notesSvg()+positionMarksSvg(true)+textObjectsSvg(true);
- const watermark=watermarkSvg().replace(/<rect[^>]*\/>$/,`<rect x="${box.x0}" y="${box.y0}" width="${box.x1-box.x0}" height="${box.y1-box.y0}" fill="url(#brandWatermark)"/>`);
  const title=xmlText(patternPages[activePage].name);let sheets='';
  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
   const x=box.x0+col*sx,y=box.y0+row*sy,top=margin+header;
+  const watermark=watermarkSvg({x0:x,y0:y,x1:x+cw,y1:y+ch});
   const vertical=col<cols-1?`<path d="M ${margin+sx} ${top} v ${ch}" stroke="#888" stroke-width=".15" stroke-dasharray="2 2"/>`:'';
   const horizontal=row<rows-1?`<path d="M ${margin} ${top+sy} h ${cw}" stroke="#888" stroke-width=".15" stroke-dasharray="2 2"/>`:'';
   sheets+=`<section><svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="white"/><g font-family="sans-serif" fill="black"><text x="${margin}" y="${margin+3}" font-size="3.3">${title} · 第 ${row+1} 行／${col+1} 列 · ${row*cols+col+1}/${rows*cols}</text><text x="${margin}" y="${margin+7}" font-size="2.5">100% 原尺寸 · 重疊 ${overlap} mm · 淺灰虛線為拼接定位線</text></g><svg x="${margin}" y="${top}" width="${cw}" height="${ch}" viewBox="${x} ${y} ${cw} ${ch}" overflow="hidden">${watermark}${content}</svg><rect x="${margin}" y="${top}" width="${cw}" height="${ch}" fill="none" stroke="#888" stroke-width=".15"/>${vertical}${horizontal}<path d="M ${margin} ${h-11} v 3 h 50 v -3 M ${margin+25} ${h-8} v -2" fill="none" stroke="black" stroke-width=".25"/><text x="${margin+55}" y="${h-8}" font-family="sans-serif" font-size="3">校正尺 50 mm（5 公分）</text></svg></section>`;
